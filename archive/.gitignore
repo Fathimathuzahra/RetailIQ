@@ -1,0 +1,19 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.class
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data files (optional - include small samples only)
+*.csv
+*.xlsx
+
+# Environment
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
