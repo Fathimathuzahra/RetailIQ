@@ -13,11 +13,14 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
 CORS_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-    ).split(",")
-    if origin.strip()
+    origin
+    for origin in {
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        ).split(",")
+        if origin.strip()
+    } | {"https://retailiq-sigma.vercel.app"}
 ]
 
 app = FastAPI(title="RetailIQ API", version="1.0.0",

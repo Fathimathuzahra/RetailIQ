@@ -9,7 +9,7 @@ import {
   Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 
-const API = `${(import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')}/api`;
+const API = `${(import.meta.env.VITE_API_URL || 'https://retailiq-api-ez9o.onrender.com').replace(/\/$/, '')}/api`;
 const CHART_COLORS = ['#6b8afd', '#50c7aa', '#f4b65f', '#b48afa', '#f47b7b'];
 
 type View = 'overview' | 'stores' | 'sales' | 'segments' | 'model';
