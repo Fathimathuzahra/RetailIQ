@@ -20,7 +20,7 @@ CORS_ORIGINS = [
             "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
         ).split(",")
         if origin.strip()
-    } | {"https://retailiq-sigma.vercel.app"}
+    } | {"https://retailq-sigma.vercel.app"}
 ]
 
 app = FastAPI(title="RetailIQ API", version="1.0.0",

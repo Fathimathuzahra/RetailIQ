@@ -93,7 +93,7 @@ The free Render instance may sleep when idle and take longer to answer its first
 1. Import the same repository into Vercel and set the **Root Directory** to `frontend`.
 2. Use `npm run build` as the build command and `dist` as the output directory. `frontend/vercel.json` configures client-side route fallback.
 3. Optionally add the `VITE_API_URL` environment variable with the Render API origin, e.g. `https://retailiq-api.onrender.com` (no trailing slash and no `/api`). The frontend defaults to this project's Render API URL.
-4. Deploy the site. The API allows this project's production origin (`https://retailiq-sigma.vercel.app`) in addition to origins listed in `CORS_ORIGINS`. If your Vercel production domain differs, add that exact origin to Render's `CORS_ORIGINS` variable, then redeploy the API.
+4. Deploy the site. The API allows this project's production origin (`https://retailq-sigma.vercel.app`) in addition to origins listed in `CORS_ORIGINS`. If your Vercel production domain differs, add that exact origin to Render's `CORS_ORIGINS` variable, then redeploy the API.
 
 Vite embeds `VITE_API_URL` during the frontend build, so redeploy the frontend after changing it. Check the deployed site, its browser console, and `https://YOUR-API.onrender.com/docs` after both services are live.
 
