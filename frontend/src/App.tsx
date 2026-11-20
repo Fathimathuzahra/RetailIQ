@@ -113,8 +113,20 @@ async function getJson<T>(path: string): Promise<T> {
       await new Promise((resolve) => window.setTimeout(resolve, retryDelays[attempt]));
       continue;
     }
+if (response.ok) {
+  const contentType = response.headers.get('content-type') || '';
 
-    if (response.ok) return response.json() as Promise<T>;
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+
+    throw new Error(
+      `API returned non-JSON content. Expected JSON but received: ${contentType}. ` +
+      `${text.slice(0, 200)}`
+    );
+  }
+
+  return response.json() as Promise<T>;
+}
     const detail = await response.text();
     if (![502, 503, 504].includes(response.status) || attempt >= retryDelays.length) {
       throw new Error(detail || `Request failed (${response.status})`);
