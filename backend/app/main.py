@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import os
+from threading import Lock
 import pandas as pd
 import numpy as np
 from functools import lru_cache
@@ -31,7 +32,8 @@ app.add_middleware(
 )
 
 @lru_cache(maxsize=1)
-def load_data():
+@lru_cache(maxsize=1)
+def _load_data():
     sales = pd.read_csv(DATA / "sales data-set.csv")
     features = pd.read_csv(DATA / "Features data set.csv")
     stores = pd.read_csv(DATA / "stores data-set.csv")
@@ -51,6 +53,12 @@ def load_data():
     merged["Week"] = merged["Date"].dt.isocalendar().week.astype(int)
     merged = merged.replace([np.inf, -np.inf], np.nan)
     return merged, stores
+
+_data_load_lock = Lock()
+
+def load_data():
+    with _data_load_lock:
+        return _load_data()
 
 def records(df):
     return df.replace({np.nan: None}).to_dict(orient="records")

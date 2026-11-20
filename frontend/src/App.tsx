@@ -9,7 +9,9 @@ import {
   Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 
-const API = `${(import.meta.env.VITE_API_URL || 'https://retailiq-api-ez9o.onrender.com').replace(/\/$/, '')}/api`;
+const API_ORIGIN = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const API = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
+const API_DOCS = `${API_ORIGIN || 'https://retailiq-api-ez9o.onrender.com'}/docs`;
 const CHART_COLORS = ['#6b8afd', '#50c7aa', '#f4b65f', '#b48afa', '#f47b7b'];
 
 type View = 'overview' | 'stores' | 'sales' | 'segments' | 'model';
@@ -79,12 +81,24 @@ const number = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API}${path}`);
-  if (!response.ok) {
+  const retryDelays = [2000, 5000, 10000, 15000];
+  for (let attempt = 0; ; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(`${API}${path}`);
+    } catch (reason) {
+      if (attempt >= retryDelays.length) throw reason;
+      await new Promise((resolve) => window.setTimeout(resolve, retryDelays[attempt]));
+      continue;
+    }
+
+    if (response.ok) return response.json() as Promise<T>;
     const detail = await response.text();
-    throw new Error(detail || `Request failed (${response.status})`);
+    if (![502, 503, 504].includes(response.status) || attempt >= retryDelays.length) {
+      throw new Error(detail || `Request failed (${response.status})`);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, retryDelays[attempt]));
   }
-  return response.json() as Promise<T>;
 }
 
 function App() {
@@ -318,7 +332,7 @@ function App() {
           />}
           <footer className="page-footer">
             <span>RetailIQ <span className="footer-dot">·</span> Sales intelligence for better retail decisions</span>
-            <a href={`${API.replace(/\/api$/, '')}/docs`} target="_blank" rel="noreferrer">API documentation <ExternalLink size={12} /></a>
+            <a href={API_DOCS} target="_blank" rel="noreferrer">API documentation <ExternalLink size={12} /></a>
           </footer>
         </div>
       </main>
