@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowDown, ArrowUp, BarChart3, CalendarDays, Check, ChevronDown,
@@ -61,7 +62,28 @@ type DashboardData = {
   trend: TrendRow[];
   segments: SegmentRow[];
 };
+type UserProfile = {
+  name: string;
+  role: string;
+};
 
+const DEFAULT_PROFILE: UserProfile = {
+  name: 'Retail Analyst',
+  role: 'Analytics Workspace',
+};
+
+function getSavedProfile(): UserProfile {
+  try {
+    const saved = localStorage.getItem('retailiq-profile');
+    return saved ? { ...DEFAULT_PROFILE, ...JSON.parse(saved) } : DEFAULT_PROFILE;
+  } catch {
+    return DEFAULT_PROFILE;
+  }
+}
+
+function getSavedTheme(): 'light' | 'dark' {
+  return localStorage.getItem('retailiq-theme') === 'dark' ? 'dark' : 'light';
+}
 const NAV_ITEMS: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'stores', label: 'Store performance', icon: Store },
@@ -119,7 +141,13 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
   const periodPickerRef = useRef<HTMLDivElement>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(getSavedTheme);
+const [profile, setProfile] = useState<UserProfile>(getSavedProfile);
 
+const [profileOpen, setProfileOpen] = useState(false);
+const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+
+const [profileDraft, setProfileDraft] = useState<UserProfile>(profile);
   const refresh = useCallback(async () => {
     setBusy(true);
     setError('');
@@ -142,7 +170,14 @@ function App() {
   }, [granularity, year]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+useEffect(() => {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('retailiq-theme', theme);
+}, [theme]);
 
+const toggleTheme = () => {
+  setTheme((current) => current === 'light' ? 'dark' : 'light');
+};
   useEffect(() => {
     if (!periodOpen) return;
     const closeOnOutsideClick = (event: MouseEvent) => {
@@ -209,7 +244,24 @@ function App() {
       void refreshEvaluation();
     }
   };
+const openProfile = () => {
+  setProfileDraft(profile);
+  setProfileMenuOpen(false);
+  setProfileOpen(true);
+};
 
+const saveProfile = () => {
+  const updatedProfile = {
+    name: profileDraft.name.trim() || DEFAULT_PROFILE.name,
+    role: profileDraft.role.trim() || DEFAULT_PROFILE.role,
+  };
+
+  setProfile(updatedProfile);
+  localStorage.setItem('retailiq-profile', JSON.stringify(updatedProfile));
+  setProfileOpen(false);
+};
+
+const avatarLetter = (profile.name.trim().charAt(0) || 'R').toUpperCase();
   const filteredStores = useMemo(() => {
     if (!data) return [];
     const term = query.trim().toLowerCase();
@@ -259,11 +311,17 @@ function App() {
             <b>Walmart weekly sales</b>
             <small>Historical dataset · 2010–2012</small>
           </div>
-          <div className="side-user">
-            <span className="user-avatar">R</span>
-            <span><b>Retail analyst</b><small>Analytics workspace</small></span>
-            <CircleHelp size={17} className="help-icon" />
-          </div>
+          <div className="side-user profile-clickable" onClick={openProfile} role="button" tabIndex={0}
+  onKeyDown={(e) => e.key === 'Enter' && openProfile()}>
+  <span className="user-avatar">{avatarLetter}</span>
+
+  <span className="user-info">
+    <b>{profile.name}</b>
+    <small>{profile.role}</small>
+  </span>
+
+  <Settings size={16} className="help-icon" />
+</div>
         </div>
       </aside>
 
@@ -273,6 +331,14 @@ function App() {
           <button className="menu-toggle icon-button" aria-label="Open navigation" onClick={() => setMenuOpen(true)}><Menu size={19} /></button>
           <div className="breadcrumb"><span>RetailIQ</span><span className="crumb-slash">/</span><b>{NAV_ITEMS.find((item) => item.id === view)?.label}</b></div>
           <div className="topbar-actions">
+            <button
+  className="icon-button theme-toggle"
+  onClick={toggleTheme}
+  title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+  aria-label="Toggle theme"
+>
+  {theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}
+</button>
             <div className="period-picker" ref={periodPickerRef}>
               <button className="period-pill" aria-haspopup="menu" aria-expanded={periodOpen} onClick={() => setPeriodOpen((open) => !open)}>
                 <CalendarDays size={15} /><span>{periodLabel}</span><ChevronDown size={14} />
@@ -292,7 +358,9 @@ function App() {
             <button className="icon-button refresh-button" title="Refresh analytics" onClick={refreshAll} disabled={busy || modelBusy}>
               {busy ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={16} />}
             </button>
-            <span className="avatar-small">R</span>
+   <button className="avatar-small profile-trigger" onClick={openProfile} title="Profile settings">
+  {avatarLetter}
+</button>
           </div>
         </header>
 
@@ -619,7 +687,145 @@ function StoreDetailDialog({ storeId, detail, busy, error, onClose }: {
     </div>
   );
 }
+function ProfileDialog({
+  profile,
+  setProfile,
+  onSave,
+  onClose,
+  theme,
+  setTheme,
+}: {
+  profile: UserProfile;
+  setProfile: (profile: UserProfile) => void;
+  onSave: () => void;
+  onClose: () => void;
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
 
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="profile-modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="profile-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-title"
+      >
+        <div className="profile-modal-header">
+          <div>
+            <span className="eyebrow">
+              <span className="eyebrow-line" />
+              PERSONAL SETTINGS
+            </span>
+            <h2 id="profile-title">Profile & preferences</h2>
+            <p>Personalize your RetailIQ workspace.</p>
+          </div>
+
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="profile-preview">
+          <div className="profile-avatar-large">
+            {(profile.name.trim().charAt(0) || 'R').toUpperCase()}
+          </div>
+
+          <div>
+            <b>{profile.name || 'Your name'}</b>
+            <span>{profile.role || 'Your role'}</span>
+          </div>
+        </div>
+
+        <div className="profile-form">
+          <label>
+            Display name
+            <input
+              type="text"
+              value={profile.name}
+              onChange={(e) =>
+                setProfile({ ...profile, name: e.target.value })
+              }
+              placeholder="Enter your name"
+              maxLength={40}
+            />
+          </label>
+
+          <label>
+            Role / Workspace
+            <input
+              type="text"
+              value={profile.role}
+              onChange={(e) =>
+                setProfile({ ...profile, role: e.target.value })
+              }
+              placeholder="Data Analyst"
+              maxLength={60}
+            />
+          </label>
+        </div>
+
+        <div className="preferences-section">
+          <div className="preferences-heading">
+            <Palette size={17} />
+            <b>Appearance</b>
+          </div>
+
+          <div className="theme-options">
+            <button
+              className={`theme-option ${theme === 'light' ? 'theme-selected' : ''}`}
+              onClick={() => setTheme('light')}
+            >
+              <Sun size={18} />
+              <span>
+                <b>Light</b>
+                <small>Bright workspace</small>
+              </span>
+              {theme === 'light' && <Check size={16} />}
+            </button>
+
+            <button
+              className={`theme-option ${theme === 'dark' ? 'theme-selected' : ''}`}
+              onClick={() => setTheme('dark')}
+            >
+              <Moon size={18} />
+              <span>
+                <b>Dark</b>
+                <small>Low-light workspace</small>
+              </span>
+              {theme === 'dark' && <Check size={16} />}
+            </button>
+          </div>
+        </div>
+
+        <div className="profile-modal-actions">
+          <button className="secondary-button" onClick={onClose}>
+            Cancel
+          </button>
+
+          <button className="primary-button" onClick={onSave}>
+            <Save size={15} />
+            Save preferences
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 function DataNote() {
   return <div className="data-footnote"><span><Download size={13} /> Source: Walmart historical weekly sales dataset</span><span>Analytics are descriptive—not a guarantee of future performance.</span></div>;
 }
