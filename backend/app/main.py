@@ -55,36 +55,17 @@ def load_data():
 def records(df):
     return df.replace({np.nan: None}).to_dict(orient="records")
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok", "service": "RetailIQ API"}
+def filter_year(df: pd.DataFrame, year: int | None) -> pd.DataFrame:
+    if year is None:
+        return df
+    available_years = sorted(int(value) for value in df["Year"].dropna().unique())
+    if year not in available_years:
+        raise HTTPException(
+            400, f"year must be one of {available_years} or omitted for all data"
+        )
+    return df.loc[df["Year"] == year]
 
-@app.get("/api/overview")
-def overview():
-    df, stores = load_data()
-    total = float(df["Weekly_Sales"].sum())
-    return {
-        "total_sales": round(total, 2),
-        "sales_records": int(len(df)),
-        "stores": int(stores["Store"].nunique()),
-        "departments": int(df["Dept"].nunique()),
-        "average_weekly_sales": round(float(df["Weekly_Sales"].mean()), 2),
-        "date_start": df["Date"].min().strftime("%Y-%m-%d"),
-        "date_end": df["Date"].max().strftime("%Y-%m-%d"),
-    }
-
-@app.get("/api/sales/trend")
-def sales_trend(granularity: str = "month"):
-    if granularity not in {"month", "week"}:
-        raise HTTPException(400, "granularity must be month or week")
-    df, _ = load_data()
-    key = df["Date"].dt.to_period("M").astype(str) if granularity == "month" else df["Date"].dt.to_period("W").astype(str)
-    result = df.assign(period=key).groupby("period", as_index=False)["Weekly_Sales"].sum()
-    return records(result.rename(columns={"period": "period", "Weekly_Sales": "sales"}))
-
-@app.get("/api/stores")
-def store_performance():
-    df, _ = load_data()
+def summarize_stores(df: pd.DataFrame) -> pd.DataFrame:
     result = df.groupby("Store").agg(
         total_sales=("Weekly_Sales", "sum"),
         avg_weekly_sales=("Weekly_Sales", "mean"),
@@ -93,11 +74,66 @@ def store_performance():
         size=("Size", "first")
     ).reset_index()
     result["sales_volatility"] = result["sales_volatility"].fillna(0)
-    return records(result.sort_values("total_sales", ascending=False))
+    return result.sort_values("total_sales", ascending=False)
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "service": "RetailIQ API"}
+
+@app.get("/api/overview")
+def overview(year: int | None = None):
+    df, _ = load_data()
+    df = filter_year(df, year)
+    total = float(df["Weekly_Sales"].sum())
+    return {
+        "total_sales": round(total, 2),
+        "sales_records": int(len(df)),
+        "stores": int(df["Store"].nunique()),
+        "departments": int(df["Dept"].nunique()),
+        "average_weekly_sales": round(float(df["Weekly_Sales"].mean()), 2),
+        "date_start": df["Date"].min().strftime("%Y-%m-%d"),
+        "date_end": df["Date"].max().strftime("%Y-%m-%d"),
+    }
+
+@app.get("/api/sales/trend")
+def sales_trend(granularity: str = "month", year: int | None = None):
+    if granularity not in {"month", "week"}:
+        raise HTTPException(400, "granularity must be month or week")
+    df, _ = load_data()
+    df = filter_year(df, year)
+    key = df["Date"].dt.to_period("M").astype(str) if granularity == "month" else df["Date"].dt.to_period("W").astype(str)
+    result = df.assign(period=key).groupby("period", as_index=False)["Weekly_Sales"].sum()
+    return records(result.rename(columns={"period": "period", "Weekly_Sales": "sales"}))
+
+@app.get("/api/stores")
+def store_performance(year: int | None = None):
+    df, _ = load_data()
+    df = filter_year(df, year)
+    return records(summarize_stores(df))
+
+@app.get("/api/stores/{store_id}")
+def store_detail(store_id: int, year: int | None = None):
+    df, _ = load_data()
+    df = filter_year(df, year)
+    store_df = df.loc[df["Store"] == store_id]
+    if store_df.empty:
+        raise HTTPException(404, f"Store {store_id} has no records in this period")
+    summary = summarize_stores(store_df)
+    weekly = (
+        store_df.groupby("Date", as_index=False)["Weekly_Sales"]
+        .sum()
+        .rename(columns={"Weekly_Sales": "sales"})
+    )
+    weekly["period"] = weekly["Date"].dt.strftime("%Y-%m-%d")
+    return {
+        "store": records(summary)[0],
+        "trend": records(weekly[["period", "sales"]]),
+    }
 
 @app.get("/api/segments")
-def store_segments():
+def store_segments(year: int | None = None):
     df, _ = load_data()
+    df = filter_year(df, year)
     summary = df.groupby("Store").agg(
         avg_sales=("Weekly_Sales", "mean"),
         sales_std=("Weekly_Sales", "std"),
@@ -113,9 +149,10 @@ def store_segments():
     return records(summary.sort_values(["cluster", "avg_sales"], ascending=[True, False]))
 
 @app.get("/api/model/evaluation")
-@lru_cache(maxsize=1)
-def model_evaluation():
+@lru_cache(maxsize=4)
+def model_evaluation(year: int | None = None):
     df, _ = load_data()
+    df = filter_year(df, year)
     cols = ["Store", "Dept", "Temperature", "Fuel_Price", "CPI", "Unemployment",
             "IsHoliday", "Type", "Size", "Month", "Week",
             "MarkDown1", "MarkDown2", "MarkDown3", "MarkDown4", "MarkDown5"]

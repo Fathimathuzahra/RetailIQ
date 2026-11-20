@@ -69,11 +69,12 @@ npm run build
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Health check |
-| `GET` | `/api/overview` | Dataset-level sales KPIs and date range |
-| `GET` | `/api/sales/trend?granularity=month` | Sales grouped by month; accepts `month` or `week` |
-| `GET` | `/api/stores` | Store sales, variability, type, and size |
-| `GET` | `/api/segments` | Three-cluster K-Means store segmentation |
-| `GET` | `/api/model/evaluation` | Cached Random Forest evaluation and baseline metrics |
+| `GET` | `/api/overview?year=2011` | Sales KPIs and date range; omit `year` for all data |
+| `GET` | `/api/sales/trend?granularity=month&year=2011` | Sales grouped by month or week, optionally filtered by year |
+| `GET` | `/api/stores?year=2011` | Store sales, variability, type, and size for the selected year |
+| `GET` | `/api/stores/1?year=2011` | One store's summary and weekly sales history |
+| `GET` | `/api/segments?year=2011` | Three-cluster K-Means store segmentation for the selected year |
+| `GET` | `/api/model/evaluation?year=2011` | Cached, chronological Random Forest evaluation and baseline metrics |
 
 ## Deploy: Render API + Vercel frontend
 

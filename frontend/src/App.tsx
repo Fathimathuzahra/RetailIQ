@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowDown, ArrowUp, BarChart3, CalendarDays, Check, ChevronDown,
   CircleHelp, Download, ExternalLink, LayoutDashboard, LoaderCircle,
@@ -31,6 +31,7 @@ type StoreRow = {
   store_type: string;
   size: number;
 };
+type StoreDetail = { store: StoreRow; trend: TrendRow[] };
 type SegmentRow = {
   Store: number;
   avg_sales: number;
@@ -88,25 +89,33 @@ async function getJson<T>(path: string): Promise<T> {
 
 function App() {
   const [view, setView] = useState<View>('overview');
+  const [year, setYear] = useState<number | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [selectedStore, setSelectedStore] = useState<number | null>(null);
+  const [storeDetail, setStoreDetail] = useState<StoreDetail | null>(null);
   const [granularity, setGranularity] = useState<'month' | 'week'>('month');
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(true);
   const [modelBusy, setModelBusy] = useState(false);
+  const [detailBusy, setDetailBusy] = useState(false);
   const [error, setError] = useState('');
   const [modelError, setModelError] = useState('');
+  const [detailError, setDetailError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const periodPickerRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
     setBusy(true);
     setError('');
     try {
+      const periodQuery = year === null ? '' : `?year=${year}`;
       const [overview, stores, trend, segments] = await Promise.all([
-        getJson<Overview>('/overview'),
-        getJson<StoreRow[]>('/stores'),
-        getJson<TrendRow[]>(`/sales/trend?granularity=${granularity}`),
-        getJson<SegmentRow[]>('/segments'),
+        getJson<Overview>(`/overview${periodQuery}`),
+        getJson<StoreRow[]>(`/stores${periodQuery}`),
+        getJson<TrendRow[]>(`/sales/trend?granularity=${granularity}${year === null ? '' : `&year=${year}`}`),
+        getJson<SegmentRow[]>(`/segments${periodQuery}`),
       ]);
       setData({ overview, stores, trend, segments });
     } catch (reason) {
@@ -116,15 +125,33 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }, [granularity]);
+  }, [granularity, year]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!periodOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (event.target instanceof Node && !periodPickerRef.current?.contains(event.target)) {
+        setPeriodOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPeriodOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [periodOpen]);
 
   const refreshEvaluation = useCallback(async () => {
     setModelBusy(true);
     setModelError('');
     try {
-      setEvaluation(await getJson<Evaluation>('/model/evaluation'));
+      setEvaluation(await getJson<Evaluation>(`/model/evaluation${year === null ? '' : `?year=${year}`}`));
     } catch (reason) {
       setModelError(reason instanceof Error
         ? `Unable to evaluate the model. ${reason.message}`
@@ -132,7 +159,7 @@ function App() {
     } finally {
       setModelBusy(false);
     }
-  }, []);
+  }, [year]);
 
   useEffect(() => {
     if (view === 'model' && !evaluation && !modelBusy && !modelError) {
@@ -140,11 +167,32 @@ function App() {
     }
   }, [view, evaluation, modelBusy, modelError, refreshEvaluation]);
 
+  useEffect(() => {
+    if (selectedStore === null) {
+      setStoreDetail(null);
+      setDetailError('');
+      return;
+    }
+    let active = true;
+    setStoreDetail(null);
+    setDetailBusy(true);
+    setDetailError('');
+    const periodQuery = year === null ? '' : `?year=${year}`;
+    getJson<StoreDetail>(`/stores/${selectedStore}${periodQuery}`)
+      .then((result) => { if (active) setStoreDetail(result); })
+      .catch((reason: unknown) => {
+        if (active) setDetailError(reason instanceof Error ? reason.message : 'Unable to load store details.');
+      })
+      .finally(() => { if (active) setDetailBusy(false); });
+    return () => { active = false; };
+  }, [selectedStore, year]);
+
   const refreshAll = () => {
     void refresh();
     if (view === 'model') {
       setEvaluation(null);
       setModelError('');
+      void refreshEvaluation();
     }
   };
 
@@ -160,6 +208,20 @@ function App() {
     setView(nextView);
     setMenuOpen(false);
   };
+
+  const selectYear = (nextYear: number | null) => {
+    setYear(nextYear);
+    setEvaluation(null);
+    setModelError('');
+    setSelectedStore(null);
+    setPeriodOpen(false);
+  };
+
+  const selectStore = (storeId: number) => setSelectedStore(storeId);
+
+  const periodLabel = year === null
+    ? data ? `${data.overview.date_start} — ${data.overview.date_end}` : 'Dataset period'
+    : `${year} dataset`;
 
   return (
     <div className="app-shell">
@@ -197,7 +259,22 @@ function App() {
           <button className="menu-toggle icon-button" aria-label="Open navigation" onClick={() => setMenuOpen(true)}><Menu size={19} /></button>
           <div className="breadcrumb"><span>RetailIQ</span><span className="crumb-slash">/</span><b>{NAV_ITEMS.find((item) => item.id === view)?.label}</b></div>
           <div className="topbar-actions">
-            <div className="period-pill"><CalendarDays size={15} /><span>{data ? `${data.overview.date_start} — ${data.overview.date_end}` : 'Dataset period'}</span><ChevronDown size={14} /></div>
+            <div className="period-picker" ref={periodPickerRef}>
+              <button className="period-pill" aria-haspopup="menu" aria-expanded={periodOpen} onClick={() => setPeriodOpen((open) => !open)}>
+                <CalendarDays size={15} /><span>{periodLabel}</span><ChevronDown size={14} />
+              </button>
+              {periodOpen && <div className="period-menu" role="menu" aria-label="Filter dataset period">
+                <div className="period-menu-title">FILTER DATASET</div>
+                <button role="menuitemradio" aria-checked={year === null} className={year === null ? 'period-option selected' : 'period-option'} onClick={() => selectYear(null)}>
+                  <span>All available data</span><small>2010–2012</small>{year === null && <Check size={14} />}
+                </button>
+                {[2010, 2011, 2012].map((option) => (
+                  <button key={option} role="menuitemradio" aria-checked={year === option} className={year === option ? 'period-option selected' : 'period-option'} onClick={() => selectYear(option)}>
+                    <span>{option}</span><small>Calendar year</small>{year === option && <Check size={14} />}
+                  </button>
+                ))}
+              </div>}
+            </div>
             <button className="icon-button refresh-button" title="Refresh analytics" onClick={refreshAll} disabled={busy || modelBusy}>
               {busy ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={16} />}
             </button>
@@ -221,10 +298,10 @@ function App() {
           {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => void refresh()}>Retry</button></div>}
           {busy && !data ? <LoadingState /> : data ? (
             <>
-              {view === 'overview' && <OverviewView data={data} granularity={granularity} setGranularity={setGranularity} />}
-              {view === 'stores' && <StoresView stores={filteredStores} query={query} setQuery={setQuery} />}
+              {view === 'overview' && <OverviewView data={data} granularity={granularity} setGranularity={setGranularity} onNavigate={selectView} onSelectStore={selectStore} />}
+              {view === 'stores' && <StoresView stores={filteredStores} query={query} setQuery={setQuery} onSelectStore={selectStore} />}
               {view === 'sales' && <SalesView data={data} granularity={granularity} setGranularity={setGranularity} />}
-              {view === 'segments' && <SegmentsView segments={data.segments} />}
+              {view === 'segments' && <SegmentsView segments={data.segments} onSelectStore={selectStore} />}
               {view === 'model' && (evaluation
                 ? <ModelView evaluation={evaluation} />
                 : modelError
@@ -232,6 +309,13 @@ function App() {
                   : <LoadingState />)}
             </>
           ) : !error ? <LoadingState /> : null}
+          {selectedStore !== null && <StoreDetailDialog
+            storeId={selectedStore}
+            detail={storeDetail}
+            busy={detailBusy}
+            error={detailError}
+            onClose={() => setSelectedStore(null)}
+          />}
           <footer className="page-footer">
             <span>RetailIQ <span className="footer-dot">·</span> Sales intelligence for better retail decisions</span>
             <a href={`${API.replace(/\/api$/, '')}/docs`} target="_blank" rel="noreferrer">API documentation <ExternalLink size={12} /></a>
@@ -266,16 +350,17 @@ function LoadingState() {
   return <div className="loading-state"><LoaderCircle className="spin" size={23} /><span>Loading your retail insights…</span></div>;
 }
 
-function KpiCard({ label, value, note, icon: Icon, tone, badge }: {
-  label: string; value: string; note: string; icon: typeof Store; tone: string; badge?: string;
+function KpiCard({ label, value, note, icon: Icon, tone, badge, onClick }: {
+  label: string; value: string; note: string; icon: typeof Store; tone: string; badge?: string; onClick?: () => void;
 }) {
-  return (
-    <article className="kpi-card">
+  const content = <>
       <div className="kpi-top"><span>{label}</span><span className={`kpi-icon ${tone}`}><Icon size={17} strokeWidth={1.9} /></span></div>
       <div className="kpi-value">{value}</div>
       <div className="kpi-foot"><span>{note}</span>{badge && <span className="kpi-badge"><Activity size={11} /> {badge}</span>}</div>
-    </article>
-  );
+  </>;
+  return onClick
+    ? <button className="kpi-card kpi-button" onClick={onClick} aria-label={`${label}: ${value}. Open related view`}>{content}</button>
+    : <article className="kpi-card">{content}</article>;
 }
 
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number; name?: string; color?: string }[]; label?: string }) {
@@ -321,7 +406,7 @@ function TrendChart({ trend, granularity, setGranularity, large = false }: {
   );
 }
 
-function TopStoresChart({ stores }: { stores: StoreRow[] }) {
+function TopStoresChart({ stores, onSelectStore }: { stores: StoreRow[]; onSelectStore: (storeId: number) => void }) {
   const topStores = stores.slice(0, 6).map((store) => ({ ...store, label: `Store ${store.Store}` })).reverse();
   return (
     <section className="surface-card chart-card">
@@ -333,7 +418,9 @@ function TopStoresChart({ stores }: { stores: StoreRow[] }) {
             <XAxis type="number" tickFormatter={(value: number) => money(value, true)} tick={{ fill: '#8b94a6', fontSize: 10 }} tickLine={false} axisLine={false} />
             <YAxis type="category" dataKey="label" width={62} tick={{ fill: '#616c80', fontSize: 11 }} tickLine={false} axisLine={false} />
             <Tooltip content={<ChartTooltip />} cursor={{ fill: '#f5f7fb' }} />
-            <Bar dataKey="total_sales" name="Sales" fill="#50bda5" radius={[0, 5, 5, 0]} barSize={15} />
+            <Bar dataKey="total_sales" name="Sales" fill="#50bda5" radius={[0, 5, 5, 0]} barSize={15} cursor="pointer" onClick={(entry) => {
+              if (entry && 'Store' in entry) onSelectStore(Number(entry.Store));
+            }} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -342,27 +429,28 @@ function TopStoresChart({ stores }: { stores: StoreRow[] }) {
   );
 }
 
-function OverviewView({ data, granularity, setGranularity }: {
+function OverviewView({ data, granularity, setGranularity, onNavigate, onSelectStore }: {
   data: DashboardData; granularity: 'month' | 'week'; setGranularity: (value: 'month' | 'week') => void;
+  onNavigate: (view: View) => void; onSelectStore: (storeId: number) => void;
 }) {
   return <>
     <div className="section-kicker"><span>AT A GLANCE</span><span className="kicker-rule" /><span className="data-caption">ALL STORES · ALL DEPARTMENTS</span></div>
     <div className="kpi-grid">
-      <KpiCard label="Total recorded sales" value={money(data.overview.total_sales, true)} note={`${number(data.overview.sales_records)} weekly records`} icon={BarChart3} tone="tone-blue" badge="2010–2012" />
-      <KpiCard label="Stores analyzed" value={number(data.overview.stores)} note="Across the dataset" icon={Store} tone="tone-green" />
-      <KpiCard label="Departments" value={number(data.overview.departments)} note="Distinct departments" icon={LayoutDashboard} tone="tone-violet" />
-      <KpiCard label="Avg. weekly sales" value={money(data.overview.average_weekly_sales)} note="Per store / department" icon={Activity} tone="tone-amber" />
+      <KpiCard label="Total recorded sales" value={money(data.overview.total_sales, true)} note={`${number(data.overview.sales_records)} weekly records`} icon={BarChart3} tone="tone-blue" badge={data.overview.date_start.slice(0, 4) === data.overview.date_end.slice(0, 4) ? data.overview.date_start.slice(0, 4) : '2010–2012'} onClick={() => onNavigate('sales')} />
+      <KpiCard label="Stores analyzed" value={number(data.overview.stores)} note="Across the dataset" icon={Store} tone="tone-green" onClick={() => onNavigate('stores')} />
+      <KpiCard label="Departments" value={number(data.overview.departments)} note="Distinct departments" icon={LayoutDashboard} tone="tone-violet" onClick={() => onNavigate('stores')} />
+      <KpiCard label="Avg. weekly sales" value={money(data.overview.average_weekly_sales)} note="Per store / department" icon={Activity} tone="tone-amber" onClick={() => onNavigate('sales')} />
     </div>
     <div className="overview-grid">
       <TrendChart trend={data.trend} granularity={granularity} setGranularity={setGranularity} />
-      <TopStoresChart stores={data.stores} />
+      <TopStoresChart stores={data.stores} onSelectStore={onSelectStore} />
     </div>
-    <StoreTable stores={data.stores.slice(0, 5)} compact />
+    <StoreTable stores={data.stores.slice(0, 5)} compact onSelectStore={onSelectStore} />
     <DataNote />
   </>;
 }
 
-function StoreTable({ stores, compact = false }: { stores: StoreRow[]; compact?: boolean }) {
+function StoreTable({ stores, compact = false, onSelectStore }: { stores: StoreRow[]; compact?: boolean; onSelectStore: (storeId: number) => void }) {
   return (
     <section className="surface-card table-card">
       <div className="card-heading">
@@ -371,7 +459,7 @@ function StoreTable({ stores, compact = false }: { stores: StoreRow[]; compact?:
       </div>
       <div className="table-scroll"><table><thead><tr><th>STORE</th><th>TYPE</th><th>STORE SIZE</th><th>AVG. WEEKLY SALES</th><th>SALES VARIABILITY</th><th>TOTAL SALES</th></tr></thead>
         <tbody>{stores.map((store, index) => <tr key={store.Store}>
-          <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><b>Store {store.Store}</b></td>
+          <td><span className="rank-number">{String(index + 1).padStart(2, '0')}</span><button className="store-row-link" onClick={() => onSelectStore(store.Store)} aria-label={`Open Store ${store.Store} details`}>Store {store.Store}</button></td>
           <td><span className={`store-type type-${store.store_type.toLowerCase()}`}>{store.store_type}</span></td>
           <td>{number(store.size)} <span className="cell-muted">sq ft</span></td>
           <td>{money(store.avg_weekly_sales)}</td>
@@ -384,11 +472,11 @@ function StoreTable({ stores, compact = false }: { stores: StoreRow[]; compact?:
   );
 }
 
-function StoresView({ stores, query, setQuery }: { stores: StoreRow[]; query: string; setQuery: (value: string) => void }) {
+function StoresView({ stores, query, setQuery, onSelectStore }: { stores: StoreRow[]; query: string; setQuery: (value: string) => void; onSelectStore: (storeId: number) => void }) {
   return <>
     <div className="section-kicker"><span>LOCATION COMPARISON</span><span className="kicker-rule" /><span className="data-caption">45 STORES IN DATASET</span></div>
     <div className="store-toolbar"><div className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by store or type…" aria-label="Search stores" />{query && <button aria-label="Clear search" onClick={() => setQuery('')}><X size={14} /></button>}</div><span>{stores.length} locations</span></div>
-    <StoreTable stores={stores} />
+    <StoreTable stores={stores} onSelectStore={onSelectStore} />
     <DataNote />
   </>;
 }
@@ -412,7 +500,7 @@ function SalesView({ data, granularity, setGranularity }: {
   </>;
 }
 
-function SegmentsView({ segments }: { segments: SegmentRow[] }) {
+function SegmentsView({ segments, onSelectStore }: { segments: SegmentRow[]; onSelectStore: (storeId: number) => void }) {
   const clusters = useMemo(() => [...new Set(segments.map((store) => store.cluster))].sort((a, b) => a - b).map((cluster) => {
     const members = segments.filter((store) => store.cluster === cluster);
     return {
@@ -433,7 +521,7 @@ function SegmentsView({ segments }: { segments: SegmentRow[] }) {
         <div className="segment-card-head"><span className={`segment-badge segment-${index}`}>SEGMENT {cluster.cluster + 1}</span><span className="segment-count">{cluster.count} stores</span></div>
         <div className="segment-metric">{money(cluster.average)}<small>average weekly sales</small></div>
         <div className="segment-details"><div><span>Avg. store size</span><b>{number(Math.round(cluster.size))} sq ft</b></div><div><span>Sales variability</span><b>{percent(cluster.volatility)}</b></div></div>
-        <div className="store-chips">{cluster.stores.map((store) => <span key={store.Store}>#{store.Store}</span>)}</div>
+        <div className="store-chips">{cluster.stores.map((store) => <button key={store.Store} onClick={() => onSelectStore(store.Store)} aria-label={`Open Store ${store.Store} details`}>#{store.Store}</button>)}</div>
       </article>
     ))}</div>
     <section className="surface-card segment-chart-card"><div className="card-heading"><div><h2>Store distribution</h2><p>Number of locations assigned to each cluster</p></div></div><div className="donut-wrap">
@@ -467,6 +555,55 @@ function ModelView({ evaluation }: { evaluation: Evaluation }) {
     <div className="insight-note"><span className="note-icon"><CircleHelp size={16} /></span><div><b>Interpret results with care</b><p>Feature importance describes model behavior, not causation. The seasonal baseline uses the prior year's sales for the same store and department when available; missing matches fall back to the training median.</p></div></div>
     <DataNote />
   </>;
+}
+
+function StoreDetailDialog({ storeId, detail, busy, error, onClose }: {
+  storeId: number; detail: StoreDetail | null; busy: boolean; error: string; onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="store-dialog" role="dialog" aria-modal="true" aria-labelledby="store-dialog-title">
+        <div className="dialog-heading">
+          <div><span className="eyebrow"><span className="eyebrow-line" /> STORE DETAIL</span><h2 id="store-dialog-title">Store {storeId}</h2></div>
+          <button className="icon-button" aria-label="Close store details" onClick={onClose}><X size={17} /></button>
+        </div>
+        {busy && <LoadingState />}
+        {error && <div className="dialog-error" role="alert">{error}</div>}
+        {detail && <>
+          <div className="dialog-kpis">
+            <div><span>Total sales</span><b>{money(detail.store.total_sales)}</b></div>
+            <div><span>Average weekly sales</span><b>{money(detail.store.avg_weekly_sales)}</b></div>
+            <div><span>Store size</span><b>{number(detail.store.size)} sq ft</b></div>
+            <div><span>Store type</span><b>{detail.store.store_type}</b></div>
+          </div>
+          <section className="surface-card dialog-chart">
+            <div className="card-heading"><div><h2>Weekly sales</h2><p>{detail.trend.length} sales periods in the selected dataset period</p></div></div>
+            <div className="chart-container">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={detail.trend} margin={{ top: 8, right: 7, left: -10, bottom: 0 }}>
+                  <defs><linearGradient id="storeSalesFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6385ff" stopOpacity={0.22} /><stop offset="95%" stopColor="#6385ff" stopOpacity={0.01} /></linearGradient></defs>
+                  <CartesianGrid vertical={false} stroke="#edf0f5" strokeDasharray="3 5" />
+                  <XAxis dataKey="period" tickFormatter={(value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })} tick={{ fill: '#8b94a6', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={35} />
+                  <YAxis tickFormatter={(value: number) => money(value, true)} tick={{ fill: '#8b94a6', fontSize: 10 }} tickLine={false} axisLine={false} width={52} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area type="monotone" dataKey="sales" name="Sales" stroke="#6989ff" strokeWidth={2} fill="url(#storeSalesFill)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+          <DataNote />
+        </>}
+      </section>
+    </div>
+  );
 }
 
 function DataNote() {
