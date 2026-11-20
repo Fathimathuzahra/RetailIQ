@@ -1,10 +1,10 @@
-
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowDown, ArrowUp, BarChart3, CalendarDays, Check, ChevronDown,
   CircleHelp, Download, ExternalLink, LayoutDashboard, LoaderCircle,
   MapPin, Menu, RefreshCw, Search, Sparkles, Store, Target, TrendingUp, X,
+  Moon, Sun, Settings, Save, Palette,
 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend,
   Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -145,8 +145,6 @@ function App() {
 const [profile, setProfile] = useState<UserProfile>(getSavedProfile);
 
 const [profileOpen, setProfileOpen] = useState(false);
-const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-
 const [profileDraft, setProfileDraft] = useState<UserProfile>(profile);
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -246,7 +244,6 @@ const toggleTheme = () => {
   };
 const openProfile = () => {
   setProfileDraft(profile);
-  setProfileMenuOpen(false);
   setProfileOpen(true);
 };
 
@@ -398,6 +395,16 @@ const avatarLetter = (profile.name.trim().charAt(0) || 'R').toUpperCase();
             error={detailError}
             onClose={() => setSelectedStore(null)}
           />}
+          {profileOpen && (
+  <ProfileDialog
+    profile={profileDraft}
+    setProfile={setProfileDraft}
+    onSave={saveProfile}
+    onClose={() => setProfileOpen(false)}
+    theme={theme}
+    setTheme={setTheme}
+  />
+)}
           <footer className="page-footer">
             <span>RetailIQ <span className="footer-dot">·</span> Sales intelligence for better retail decisions</span>
             <a href={API_DOCS} target="_blank" rel="noreferrer">API documentation <ExternalLink size={12} /></a>
